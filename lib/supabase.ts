@@ -1,1 +1,293 @@
-import { createClient } from '@supabase/supabase-js';nnconst supabaseUrl = 'https://mqnhqdtxruwyrinlhgox.supabase.co';nconst supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xbmhxZHR4cnV3eXJpbmxoZ294Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ3MzY0MzEsImV4cCI6MjA2MDMxMjQzMX0.4tme48Pm3GIVxhZTDdhxVrAJ3quLnpk7WTQkDDP6viI';nnexport const supabase = createClient(supabaseUrl, supabaseAnonKey);nn// Types for our processed videos tablenexport interface ProcessedVideoDb {n  id: string;n  user_id: string | null;n  video_url: string;n  video_id: string;n  title: string;n  channel_name?: string;n  thumbnail_url?: string;n  prefix: string;n  markdown_content?: string;n  processed_at: string;n  created_at: string;n  updated_at: string;n  playbook_generated: boolean;n  playbook_content?: string;n  playbook_generated_at?: string;n}nn// Helper function to extract video ID from URLnexport const extractVideoId = (url: string): string => {n  const match = url.match(/(?:youtube\.com/watch\?v=|youtu\.be/)([^&\n?#]+)/);n  return match ? match[1] : url;n};nn// Helper function to save processed video to Supabasenexport const saveProcessedVideo = async (videoData: {n  video_url: string;n  title: string;n  channel_name?: string;n  thumbnail_url?: string;n  prefix: string;n  markdown_content?: string;n}) => {n  const video_id = extractVideoId(videoData.video_url);n  n  // Get current user (will be null for anonymous users)n  const { data: { user } } = await supabase.auth.getUser();n  n  const { data, error } = await supabasen    .from('processed_videos')n    .insert([n      {n        user_id: user?.id || null, // Allow null for anonymous usersn        video_url: videoData.video_url,n        video_id,n        title: videoData.title,n        channel_name: videoData.channel_name,n        thumbnail_url: videoData.thumbnail_url,n        prefix: videoData.prefix,n        markdown_content: videoData.markdown_content,n      }n    ])n    .select()n    .single();nn  if (error) {n    console.error('Error saving processed video:', error);n    console.error('Error details:', JSON.stringify(error, null, 2));n    throw error;n  }nn  return data;n};nn// Helper function to load processed videos from Supabasenexport const loadProcessedVideos = async () => {n  // Get current user (will be null for anonymous users)n  const { data: { user } } = await supabase.auth.getUser();n  n  let query = supabasen    .from('processed_videos')n    .select('*')n    .order('created_at', { ascending: false });n  n  // If user is authenticated, filter by user_idn  // If anonymous, show all videos with null user_idn  if (user) {n    query = query.eq('user_id', user.id);n  } else {n    query = query.is('user_id', null);n  }nn  const { data, error } = await query;nn  if (error) {n    console.error('Error loading processed videos:', error);n    console.error('Error details:', JSON.stringify(error, null, 2));n    throw error;n  }nn  return data || [];n};nn// Helper function to update video playbooknexport const updateVideoPlaybook = async (videoId: string, playbookContent: string) => {n  const { data, error } = await supabasen    .from('processed_videos')n    .update({n      playbook_content: playbookContent,n      playbook_generated: true,n      playbook_generated_at: new Date().toISOString()n    })n    .eq('id', videoId)n    .select()n    .single();nn  if (error) {n    console.error('Error updating video playbook:', error);n    throw error;n  }nn  return data;n};nn// Helper function to mark playbook generation as failednexport const markPlaybookGenerationFailed = async (videoId: string, errorMessage?: string) => {n  const { data, error } = await supabasen    .from('processed_videos')n    .update({n      playbook_content: errorMessage ? `ERROR: ${errorMessage}` : 'ERROR: Playbook generation failed',n      playbook_generated: false,n      playbook_generated_at: new Date().toISOString()n    })n    .eq('id', videoId)n    .select()n    .single();nn  if (error) {n    console.error('Error marking playbook generation failed:', error);n    throw error;n  }nn  return data;n};nn// Helper function to delete processed videonexport const deleteProcessedVideo = async (videoId: string) => {n  const { error } = await supabasen    .from('processed_videos')n    .delete()n    .eq('id', videoId);nn  if (error) {n    console.error('Error deleting processed video:', error);n    throw error;n  }n};nn// Types for shared playbooksnexport interface SharedPlaybookDb {n  id: string;n  user_id: string | null;n  original_video_id: string;n  share_id: string;n  title: string;n  description?: string;n  playbook_content: string;n  video_title: string;n  video_url?: string;n  channel_name?: string;n  thumbnail_url?: string;n  tags: string[];n  view_count: number;n  is_active: boolean;n  created_at: string;n  updated_at: string;n}nn// Helper function to create shared playbooknexport interface CreateSharedPlaybookData {n  original_video_id: string;n  title: string;n  description?: string;n  playbook_content: string;n  video_title: string;n  video_url?: string;n  channel_name?: string;n  thumbnail_url?: string;n  tags?: string[];n}nn// Helper function to create shared playbooknexport const createSharedPlaybook = async (data: CreateSharedPlaybookData) => {n  // Get current user (will be null for anonymous users)n  const { data: { user } } = await supabase.auth.getUser();n  n  const { data: sharedPlaybook, error } = await supabasen    .from('shared_playbooks')n    .insert([n      {n        user_id: user?.id || null,n        original_video_id: data.original_video_id,n        share_id: crypto.randomUUID(),n        title: data.title,n        description: data.description,n        playbook_content: data.playbook_content,n        video_title: data.video_title,n        video_url: data.video_url,n        channel_name: data.channel_name,n        thumbnail_url: data.thumbnail_url,n        tags: data.tags || [],n        view_count: 0,n        is_active: true,n      }n    ])n    .select()n    .single();nn  if (error) {n    console.error('Error creating shared playbook:', error);n    throw error;n  }nn  return sharedPlaybook;n};nn// Helper function to get shared playbook by share IDnexport const getSharedPlaybook = async (shareId: string) => {n  const { data, error } = await supabasen    .from('shared_playbooks')n    .select('*')n    .eq('share_id', shareId)n    .eq('is_active', true)n    .single();nn  if (error) {n    console.error('Error getting shared playbook:', error);n    throw error;n  }nn  return data;n};nn// Helper function to increment view countnexport const incrementSharedPlaybookViews = async (shareId: string) => {n  const { error } = await supabasen    .from('shared_playbooks')n    .update({ view_count: supabase.rpc('increment', { row_id: shareId }) })n    .eq('share_id', shareId);nn  if (error) {n    console.error('Error incrementing view count:', error);n  }n};nn// Helper function to get user's shared playbooksnexport const getUserSharedPlaybooks = async () => {n  // Get current user (will be null for anonymous users)n  const { data: { user } } = await supabase.auth.getUser();n  n  let query = supabasen    .from('shared_playbooks')n    .select('*')n    .order('created_at', { ascending: false });n  n  // If user is authenticated, filter by user_idn  // If anonymous, show all shared playbooks with null user_idn  if (user) {n    query = query.eq('user_id', user.id);n  } else {n    query = query.is('user_id', null);n  }nn  const { data, error } = await query;nn  if (error) {n    console.error('Error loading shared playbooks:', error);n    throw error;n  }nn  return data || [];n};nn// Helper function to deactivate shared playbooknexport const deactivateSharedPlaybook = async (shareId: string) => {n  const { error } = await supabasen    .from('shared_playbooks')n    .update({ is_active: false })n    .eq('share_id', shareId);nn  if (error) {n    console.error('Error deactivating shared playbook:', error);n    throw error;n  }n};
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Types for our processed videos table
+export interface ProcessedVideoDb {
+  id: string;
+  user_id: string | null;
+  video_url: string;
+  video_id: string;
+  title: string;
+  channel_name?: string;
+  thumbnail_url?: string;
+  prefix: string;
+  markdown_content?: string;
+  processed_at: string;
+  created_at: string;
+  updated_at: string;
+  playbook_generated: boolean;
+  playbook_content?: string;
+  playbook_generated_at?: string;
+}
+
+// Helper function to extract video ID from URL
+export const extractVideoId = (url: string): string => {
+  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
+  return match ? match[1] : url;
+};
+
+// Helper function to save processed video to Supabase
+export const saveProcessedVideo = async (videoData: {
+  video_url: string;
+  title: string;
+  channel_name?: string;
+  thumbnail_url?: string;
+  prefix: string;
+  markdown_content?: string;
+}) => {
+  const video_id = extractVideoId(videoData.video_url);
+  
+  // Get current user (will be null for anonymous users)
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  const { data, error } = await supabase
+    .from('processed_videos')
+    .insert([
+      {
+        user_id: user?.id || null, // Allow null for anonymous users
+        video_url: videoData.video_url,
+        video_id,
+        title: videoData.title,
+        channel_name: videoData.channel_name,
+        thumbnail_url: videoData.thumbnail_url,
+        prefix: videoData.prefix,
+        markdown_content: videoData.markdown_content,
+      }
+    ])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error saving processed video:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
+    throw error;
+  }
+
+  return data;
+};
+
+// Helper function to load processed videos from Supabase
+export const loadProcessedVideos = async () => {
+  // Get current user (will be null for anonymous users)
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  let query = supabase
+    .from('processed_videos')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  // If user is authenticated, filter by user_id
+  // If anonymous, show all videos with null user_id
+  if (user) {
+    query = query.eq('user_id', user.id);
+  } else {
+    query = query.is('user_id', null);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error loading processed videos:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
+    throw error;
+  }
+
+  return data || [];
+};
+
+// Helper function to update video playbook
+export const updateVideoPlaybook = async (videoId: string, playbookContent: string) => {
+  const { data, error } = await supabase
+    .from('processed_videos')
+    .update({
+      playbook_content: playbookContent,
+      playbook_generated: true,
+      playbook_generated_at: new Date().toISOString()
+    })
+    .eq('id', videoId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating video playbook:', error);
+    throw error;
+  }
+
+  return data;
+};
+
+// Helper function to mark playbook generation as failed
+export const markPlaybookGenerationFailed = async (videoId: string, errorMessage?: string) => {
+  const { data, error } = await supabase
+    .from('processed_videos')
+    .update({
+      playbook_content: errorMessage ? `ERROR: ${errorMessage}` : 'ERROR: Playbook generation failed',
+      playbook_generated: false,
+      playbook_generated_at: new Date().toISOString()
+    })
+    .eq('id', videoId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error marking playbook generation failed:', error);
+    throw error;
+  }
+
+  return data;
+};
+
+// Helper function to delete processed video
+export const deleteProcessedVideo = async (videoId: string) => {
+  const { error } = await supabase
+    .from('processed_videos')
+    .delete()
+    .eq('id', videoId);
+
+  if (error) {
+    console.error('Error deleting processed video:', error);
+    throw error;
+  }
+};
+
+// Types for shared playbooks
+export interface SharedPlaybookDb {
+  id: string;
+  user_id: string | null;
+  original_video_id: string;
+  share_id: string;
+  title: string;
+  description?: string;
+  playbook_content: string;
+  video_title: string;
+  video_url?: string;
+  channel_name?: string;
+  thumbnail_url?: string;
+  tags: string[];
+  view_count: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// Helper function to create shared playbook
+export interface CreateSharedPlaybookData {
+  original_video_id: string;
+  title: string;
+  description?: string;
+  playbook_content: string;
+  video_title: string;
+  video_url?: string;
+  channel_name?: string;
+  thumbnail_url?: string;
+  tags?: string[];
+}
+
+// Helper function to create shared playbook
+export const createSharedPlaybook = async (data: CreateSharedPlaybookData) => {
+  // Get current user (will be null for anonymous users)
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  const { data: sharedPlaybook, error } = await supabase
+    .from('shared_playbooks')
+    .insert([
+      {
+        user_id: user?.id || null,
+        original_video_id: data.original_video_id,
+        share_id: crypto.randomUUID(),
+        title: data.title,
+        description: data.description,
+        playbook_content: data.playbook_content,
+        video_title: data.video_title,
+        video_url: data.video_url,
+        channel_name: data.channel_name,
+        thumbnail_url: data.thumbnail_url,
+        tags: data.tags || [],
+        view_count: 0,
+        is_active: true,
+      }
+    ])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating shared playbook:', error);
+    throw error;
+  }
+
+  return sharedPlaybook;
+};
+
+// Helper function to get shared playbook by share ID
+export const getSharedPlaybook = async (shareId: string) => {
+  const { data, error } = await supabase
+    .from('shared_playbooks')
+    .select('*')
+    .eq('share_id', shareId)
+    .eq('is_active', true)
+    .single();
+
+  if (error) {
+    console.error('Error getting shared playbook:', error);
+    throw error;
+  }
+
+  return data;
+};
+
+// Helper function to increment view count
+export const incrementSharedPlaybookViews = async (shareId: string) => {
+  const { error } = await supabase
+    .from('shared_playbooks')
+    .update({ view_count: supabase.rpc('increment', { row_id: shareId }) })
+    .eq('share_id', shareId);
+
+  if (error) {
+    console.error('Error incrementing view count:', error);
+  }
+};
+
+// Helper function to get user's shared playbooks
+export const getUserSharedPlaybooks = async () => {
+  // Get current user (will be null for anonymous users)
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  let query = supabase
+    .from('shared_playbooks')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  // If user is authenticated, filter by user_id
+  // If anonymous, show all shared playbooks with null user_id
+  if (user) {
+    query = query.eq('user_id', user.id);
+  } else {
+    query = query.is('user_id', null);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error loading shared playbooks:', error);
+    throw error;
+  }
+
+  return data || [];
+};
+
+// Helper function to deactivate shared playbook
+export const deactivateSharedPlaybook = async (shareId: string) => {
+  const { error } = await supabase
+    .from('shared_playbooks')
+    .update({ is_active: false })
+    .eq('share_id', shareId);
+
+  if (error) {
+    console.error('Error deactivating shared playbook:', error);
+    throw error;
+  }
+};
